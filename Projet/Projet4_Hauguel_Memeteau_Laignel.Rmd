@@ -7,7 +7,10 @@ output: pdf_document
 # Chargement des Données
 
 ```{r}
-
+setwd("C:/Users/margo/OneDrive/Documents/M1_SSD/ApprentissageStat/Projet_4_ApprentissageStats/Projet_4_Apprentissage_Stats/Projet")
+load("bacteria-dataset.Rdata")
+summary(X)
+dim(X)
 ```
 
 
