@@ -1,2 +1,31 @@
-# Préparation et Exploration des Données
+---
+title: "Projet 4 : Validation croisée et Random Forests"
+author: "Margot-Arthur-Loïc"
+output: pdf_document
+---
+
+# Chargement des Données
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
 
