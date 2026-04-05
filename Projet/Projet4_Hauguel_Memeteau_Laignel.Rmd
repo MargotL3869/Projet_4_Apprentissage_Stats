@@ -11,6 +11,12 @@ setwd("C:/Users/margo/OneDrive/Documents/M1_SSD/ApprentissageStat/Projet_4_Appre
 load("bacteria-dataset.Rdata")
 summary(X)
 dim(X)
+
+#Visualisation 
+matplot(t(X), type = "l", lty = 1, col = ifelse(Y == 1, "orange", "grey"),
+        main = "Signaux spectraux (Orange = Classe 1, Gris = Classe 0)",
+        xlab = "Canal spectral", ylab = "Intensité")
+
 ```
 
 
