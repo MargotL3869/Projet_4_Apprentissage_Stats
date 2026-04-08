@@ -1,18 +1,19 @@
 ---
 title: "Projet 4 : Validation croisée et Random Forests"
-author: "Margot-Arthur-Loïc"
+author: "Margot Laignel-Arthur Hauguel-Loïc Mémeteau"
 output: pdf_document
 ---
 
 # Chargement des Données
 
 ```{r}
-setwd("C:/Users/margo/OneDrive/Documents/M1_SSD/ApprentissageStat/Projet_4_ApprentissageStats/Projet_4_Apprentissage_Stats/Projet")
-load("bacteria-dataset.Rdata")
+library(randomForest)
+#setwd("C:/Users/margo/OneDrive/Documents/M1_SSD/ApprentissageStat/Projet_4_ApprentissageStats/Projet_4_Apprentissage_Stats/Projet")
+load("Projet/bacteria-dataset.Rdata")
 summary(X)
 dim(X)
 
-#Visualisation 
+# Visualisation
 matplot(t(X), type = "l", lty = 1, col = ifelse(Y == 1, "orange", "grey"),
         main = "Signaux spectraux (Orange = Classe 1, Gris = Classe 0)",
         xlab = "Canal spectral", ylab = "Intensité")
@@ -22,19 +23,106 @@ matplot(t(X), type = "l", lty = 1, col = ifelse(Y == 1, "orange", "grey"),
 
 
 ```{r}
+parametres_ntree <- c(25, 50, 100, 250, 500, 1000)
+kfolds <- 10
 
+# Classe 1 : positive
+# Classe 0 : negative
+accuracy <- function(true_positive, true_negative, false_positive, false_negative) {
+  # Nombre total d'observations evaluees.
+  total <- true_positive + true_negative + false_positive + false_negative
+  # Evite une division par zero si jamais un fold est vide.
+  if (total == 0) return(NA_real_)
+  (true_positive + true_negative) / total
+}
+
+sensitivity <- function(true_positive, false_negative) {
+  # Sensibilite = proportion de positifs correctement detectes.
+  denom <- true_positive + false_negative
+  if (denom == 0) return(NA_real_)
+  true_positive / denom
+}
+
+specificity <- function(true_negative, false_positive) {
+  # Specificite = proportion de negatifs correctement detectes.
+  denom <- true_negative + false_positive
+  if (denom == 0) return(NA_real_)
+  true_negative / denom
+}
+
+results <- function(y_true, y_pred) {
+  # Uniformise le type pour comparer proprement "0"/"1" (facteurs, numeriques...).
+  y_true <- as.character(y_true)
+  y_pred <- as.character(y_pred)
+
+  # Composantes de la matrice de confusion (classe positive = "1").
+  true_positive <- sum(y_true == "1" & y_pred == "1")
+  false_positive <- sum(y_true == "0" & y_pred == "1")
+  true_negative <- sum(y_true == "0" & y_pred == "0")
+  false_negative <- sum(y_true == "1" & y_pred == "0")
+
+  acc <- accuracy(true_positive, true_negative, false_positive, false_negative)
+  sens <- sensitivity(true_positive, false_negative)
+  spec <- specificity(true_negative, false_positive)
+
+  c(accuracy = acc, sensitivity = sens, specificity = spec)
+}
+
+# Création de 10 folds stratifies (pour conserver la proportion des classes)
+set.seed(123)
+y_char <- as.character(Y)
+
+# On melange separement les indices des positifs et des negatifs.
+idx_pos <- sample(which(y_char == "1"))
+idx_neg <- sample(which(y_char == "0"))
+
+fold_id <- integer(length(Y))
+# Répartition des positifs dans les 10 folds.
+fold_id[idx_pos] <- rep(seq_len(kfolds), length.out = length(idx_pos))
+# Répartition des négatifs dans les 10 folds.
+fold_id[idx_neg] <- rep(seq_len(kfolds), length.out = length(idx_neg))
+
+# Liste des indices de test pour chaque fold.
+folds <- lapply(seq_len(kfolds), function(f) which(fold_id == f))
+
+# Boucle de validation croisee sur les valeurs de ntree
+# Contiendra, pour chaque ntree, les k splits (train/test) associés.
+cv_splits <- vector("list", length(parametres_ntree))
+names(cv_splits) <- paste0("ntree_", parametres_ntree)
+
+for (i in seq_along(parametres_ntree)) {
+  ntree_value <- parametres_ntree[i]
+  cv_splits[[i]] <- vector("list", kfolds)
+
+  for (fold in seq_len(kfolds)) {
+    test_idx <- folds[[fold]]
+    # Tous les indices sauf ceux de test servent a l'entrainement.
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    cv_splits[[i]][[fold]] <- list(
+      ntree = ntree_value,
+      fold = fold,
+      train_idx = train_idx,
+      test_idx = test_idx
+    )
+  }
+}
 ```
 
 ```{r}
-
+rf1 <- randomForest(x = X, y = as.factor(Y))
+summary(rf1)
+stats <- results(Y, rf1$predicted)
+print(stats)
 ```
 
 ```{r}
-
+# TODO: il faut ajouter ceci -> calculer les predictions fold par fold pour chaque ntree.
+# TODO: il faut ajouter ceci -> moyenner accuracy/sensitivity/specificity pour chaque ntree.
 ```
 
 ```{r}
-
+# TODO: il faut ajouter ceci -> appliquer la meme procedure en KNN pour K = 1,...,9.
+# TODO: il faut ajouter ceci -> comparer graphiquement RF vs KNN sur les 3 metriques.
+# TODO: il faut ajouter ceci -> etudier eventuellement l'impact de mtry.
 ```
-
-
