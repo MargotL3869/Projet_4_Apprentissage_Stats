@@ -119,6 +119,35 @@ print(stats)
 ```{r}
 # TODO: il faut ajouter ceci -> calculer les predictions fold par fold pour chaque ntree.
 # TODO: il faut ajouter ceci -> moyenner accuracy/sensitivity/specificity pour chaque ntree.
+# 1. Initialisation d'un tableau pour stocker les moyennes
+rf_perf <- matrix(0, nrow = length(parametres_ntree), ncol = 3)
+colnames(rf_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(rf_perf) <- parametres_ntree
+
+# 2. Boucle principale
+for (i in seq_along(parametres_ntree)) {
+  n <- parametres_ntree[i]
+  
+  # On utilise 'sapply' pour boucler sur les 10 folds et récupérer les résultats
+  scores_folds <- sapply(1:kfolds, function(f) {
+    # Indices train/test
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(1:nrow(X), test_idx)
+    
+    # Entraînement et Prédiction
+    mod <- randomForest(X[train_idx, ], as.factor(Y[train_idx]), ntree = n)
+    preds <- predict(mod, X[test_idx, ])
+    
+    # Calcul des métriques via ta fonction
+    return(results(Y[test_idx], preds))
+  })
+  
+  # On moyenne les résultats des 10 folds (rowMeans car sapply renvoie une matrice 3x10)
+  rf_perf[i, ] <- rowMeans(scores_folds)
+}
+
+# 3. Affichage final
+rf_perf
 ```
 
 ```{r}
