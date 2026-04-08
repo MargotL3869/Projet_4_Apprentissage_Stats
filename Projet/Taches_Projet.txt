@@ -1,0 +1,38 @@
+Identifier le problème de classification (classes 0 et 1)
+Charger le fichier bacteria-dataset.Rdata
+Vérifier les dimensions de X et Y
+Examiner la répartition des classes
+Mélanger les données (optionnel)
+Diviser les données en 10 folds
+Mettre en place une boucle de validation croisée
+Séparer train et test pour chaque fold
+Implémenter Random Forest pour différents ntree (25, 50, 100, 250, 500, 1000)
+Entraîner le modèle sur les données d’entraînement
+Faire des prédictions sur les données de test
+Construire la matrice de confusion
+Calculer accuracy
+Calculer sensibilité
+Calculer spécificité
+Faire la moyenne des métriques sur les 10 folds
+Stocker les résultats pour chaque valeur de ntree
+Tracer un graphique des performances en fonction de ntree
+Analyser les résultats et choisir le meilleur ntree
+Implémenter l’algorithme KNN pour K de 1 à 9
+Appliquer la même validation croisée pour KNN
+Calculer les mêmes métriques pour KNN
+Faire la moyenne des résultats
+Tracer les performances du KNN
+Comparer Random Forest et KNN
+Tester différentes valeurs de mtry (optionnel)
+Analyser l’impact de mtry
+Rédiger l’introduction
+Expliquer le fonctionnement des Random Forest
+Expliquer les paramètres ntree et mtry
+Faire le lien avec le cours (risque empirique, complexité)
+Présenter la méthodologie
+Insérer les graphiques
+Interpréter les résultats
+Comparer les modèles
+Rédiger la conclusion
+Ajouter le code en annexe
+Vérifier que le rapport fait moins de 6 pages
