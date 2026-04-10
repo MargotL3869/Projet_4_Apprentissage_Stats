@@ -1,0 +1,387 @@
+---
+title: "Projet 4 : Validation croisée et Random Forests"
+author: "Margot Laignel-Arthur Hauguel-Loïc Mémeteau"
+output: pdf_document
+---
+
+# Introduction
+
+L'objectif est d'évaluer des méthodes de classification pour distinguer deux classes de bactéries (`0` et `1`) à partir de signaux spectraux.  
+On compare une Random Forest et un KNN, avec une validation croisée stratifiée à 10 folds et trois métriques : `accuracy`, `sensitivity` et `specificity` (classe positive = `1`).
+
+```{r code_setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+set.seed(123)
+library(randomForest)
+load("bacteria-dataset.Rdata")
+
+parametres_ntree <- c(25, 50, 100, 250, 500, 1000)
+parametres_k <- 1:9
+kfolds <- 10
+default_mtry <- floor(sqrt(ncol(X)))
+```
+
+```{r code_metrics, include=FALSE}
+accuracy <- function(true_positive, true_negative, false_positive, false_negative) {
+  total <- true_positive + true_negative + false_positive + false_negative
+  if (total == 0) return(NA_real_)
+  (true_positive + true_negative) / total
+}
+
+sensitivity <- function(true_positive, false_negative) {
+  denom <- true_positive + false_negative
+  if (denom == 0) return(NA_real_)
+  true_positive / denom
+}
+
+specificity <- function(true_negative, false_positive) {
+  denom <- true_negative + false_positive
+  if (denom == 0) return(NA_real_)
+  true_negative / denom
+}
+
+results <- function(y_true, y_pred) {
+  y_true <- as.character(y_true)
+  y_pred <- as.character(y_pred)
+
+  true_positive <- sum(y_true == "1" & y_pred == "1")
+  false_positive <- sum(y_true == "0" & y_pred == "1")
+  true_negative <- sum(y_true == "0" & y_pred == "0")
+  false_negative <- sum(y_true == "1" & y_pred == "0")
+
+  c(
+    accuracy = accuracy(true_positive, true_negative, false_positive, false_negative),
+    sensitivity = sensitivity(true_positive, false_negative),
+    specificity = specificity(true_negative, false_positive)
+  )
+}
+```
+
+```{r code_folds, include=FALSE}
+idx_pos <- sample(which(as.character(Y) == "1"))
+idx_neg <- sample(which(as.character(Y) == "0"))
+
+fold_id <- integer(length(Y))
+fold_id[idx_pos] <- rep(seq_len(kfolds), length.out = length(idx_pos))
+fold_id[idx_neg] <- rep(seq_len(kfolds), length.out = length(idx_neg))
+
+folds <- lapply(seq_len(kfolds), function(f) which(fold_id == f))
+```
+
+```{r code_rf_cv, include=FALSE}
+rf_perf <- matrix(0, nrow = length(parametres_ntree), ncol = 3)
+colnames(rf_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(rf_perf) <- parametres_ntree
+
+for (i in seq_along(parametres_ntree)) {
+  n <- parametres_ntree[i]
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    mod <- randomForest(
+      x = X[train_idx, , drop = FALSE],
+      y = as.factor(Y[train_idx]),
+      ntree = n
+    )
+    preds <- predict(mod, X[test_idx, , drop = FALSE])
+    results(Y[test_idx], preds)
+  })
+
+  rf_perf[i, ] <- rowMeans(scores_folds)
+}
+```
+
+```{r code_knn_cv, include=FALSE}
+knn_perf <- matrix(0, nrow = length(parametres_k), ncol = 3)
+colnames(knn_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(knn_perf) <- parametres_k
+
+for (i in seq_along(parametres_k)) {
+  k <- parametres_k[i]
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    x_train <- scale(X[train_idx, , drop = FALSE])
+    center_train <- attr(x_train, "scaled:center")
+    scale_train <- attr(x_train, "scaled:scale")
+    scale_train[scale_train == 0] <- 1
+    x_test <- scale(X[test_idx, , drop = FALSE], center = center_train, scale = scale_train)
+
+    preds <- class::knn(
+      train = x_train,
+      test = x_test,
+      cl = as.factor(Y[train_idx]),
+      k = k
+    )
+    results(Y[test_idx], preds)
+  })
+
+  knn_perf[i, ] <- rowMeans(scores_folds)
+}
+```
+
+```{r code_compare, include=FALSE}
+max_acc_rf <- max(rf_perf[, "accuracy"])
+best_ntree <- min(as.numeric(rownames(rf_perf)[rf_perf[, "accuracy"] == max_acc_rf]))
+
+max_acc_knn <- max(knn_perf[, "accuracy"])
+best_k <- min(as.numeric(rownames(knn_perf)[knn_perf[, "accuracy"] == max_acc_knn]))
+
+comparaison <- rbind(
+  RF = rf_perf[as.character(best_ntree), ],
+  KNN = knn_perf[as.character(best_k), ]
+)
+
+delta <- comparaison["RF", ] - comparaison["KNN", ]
+```
+
+```{r code_mtry, include=FALSE}
+mtry_values <- sort(unique(c(5, 10, default_mtry, 20, 30, 50)))
+mtry_values <- mtry_values[mtry_values >= 1 & mtry_values <= ncol(X)]
+
+mtry_perf <- matrix(0, nrow = length(mtry_values), ncol = 3)
+colnames(mtry_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(mtry_perf) <- mtry_values
+
+for (i in seq_along(mtry_values)) {
+  m <- mtry_values[i]
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    mod <- randomForest(
+      x = X[train_idx, , drop = FALSE],
+      y = as.factor(Y[train_idx]),
+      ntree = best_ntree,
+      mtry = m
+    )
+    preds <- predict(mod, X[test_idx, , drop = FALSE])
+    results(Y[test_idx], preds)
+  })
+
+  mtry_perf[i, ] <- rowMeans(scores_folds)
+}
+
+max_acc_mtry <- max(mtry_perf[, "accuracy"])
+best_mtry <- min(as.numeric(rownames(mtry_perf)[mtry_perf[, "accuracy"] == max_acc_mtry]))
+```
+
+# Description des données
+
+Le jeu contient `r nrow(X)` observations et `r ncol(X)` variables spectrales.  
+La classe positive est `1`, la classe négative est `0`.
+
+```{r tab_data_summary, echo=FALSE}
+resume_data <- data.frame(
+  n_observations = nrow(X),
+  n_variables = ncol(X),
+  n_labels = length(Y)
+)
+knitr::kable(resume_data, caption = "Résumé des dimensions du jeu de données")
+```
+
+```{r tab_class_distribution, echo=FALSE}
+dist_classes <- as.data.frame(table(Y))
+colnames(dist_classes) <- c("classe", "effectif")
+dist_classes$proportion <- round(dist_classes$effectif / sum(dist_classes$effectif), 4)
+knitr::kable(dist_classes, caption = "Répartition des classes")
+```
+
+```{r fig_spectres, echo=FALSE}
+matplot(
+  t(X),
+  type = "l",
+  lty = 1,
+  col = ifelse(Y == 1, "orange", "grey"),
+  main = "Signaux spectraux (orange = classe 1, gris = classe 0)",
+  xlab = "Canal spectral",
+  ylab = "Intensité"
+)
+```
+
+# Méthodologie
+
+La Random Forest est une agrégation d'arbres aléatoires.  
+Le paramètre `ntree` fixe le nombre d'arbres. Le paramètre `mtry` contrôle le nombre de variables candidates à chaque split et agit sur la diversité des arbres.  
+En classification, la valeur par défaut vaut `floor(sqrt(p))`, ici `floor(sqrt(240)) = `r default_mtry``.
+
+Les performances sont estimées par validation croisée stratifiée à 10 folds avec calcul manuel de la matrice de confusion, puis de `accuracy`, `sensitivity` et `specificity`.
+
+# Résultats Random Forest
+
+```{r tab_rf_perf, echo=FALSE}
+rf_perf_df <- data.frame(ntree = as.numeric(rownames(rf_perf)), round(rf_perf, 4))
+knitr::kable(rf_perf_df, caption = "Performances moyennes de Random Forest selon ntree")
+```
+
+```{r fig_rf, echo=FALSE}
+matplot(
+  x = parametres_ntree,
+  y = rf_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "ntree",
+  ylab = "Score moyen en validation croisée",
+  main = "Random Forest : performances en fonction de ntree"
+)
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity"),
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  lty = 1,
+  pch = 1:3,
+  bty = "n"
+)
+```
+
+Le meilleur `ntree` (critère `accuracy`) est **`r best_ntree`** avec :
+- accuracy = **`r sprintf('%.4f', rf_perf[as.character(best_ntree), 'accuracy'])`**,
+- sensitivity = **`r sprintf('%.4f', rf_perf[as.character(best_ntree), 'sensitivity'])`**,
+- specificity = **`r sprintf('%.4f', rf_perf[as.character(best_ntree), 'specificity'])`**.
+
+# Résultats KNN
+
+```{r tab_knn_perf, echo=FALSE}
+knn_perf_df <- data.frame(K = as.numeric(rownames(knn_perf)), round(knn_perf, 4))
+knitr::kable(knn_perf_df, caption = "Performances moyennes de KNN selon K")
+```
+
+```{r fig_knn, echo=FALSE}
+matplot(
+  x = parametres_k,
+  y = knn_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "K",
+  ylab = "Score moyen en validation croisée",
+  main = "KNN : performances en fonction de K"
+)
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity"),
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  lty = 1,
+  pch = 1:3,
+  bty = "n"
+)
+```
+
+Le meilleur `K` (critère `accuracy`) est **`r best_k`** avec :
+- accuracy = **`r sprintf('%.4f', knn_perf[as.character(best_k), 'accuracy'])`**,
+- sensitivity = **`r sprintf('%.4f', knn_perf[as.character(best_k), 'sensitivity'])`**,
+- specificity = **`r sprintf('%.4f', knn_perf[as.character(best_k), 'specificity'])`**.
+
+# Comparaison RF vs KNN
+
+```{r tab_compare, echo=FALSE}
+knitr::kable(round(comparaison, 4), caption = "Comparaison RF vs KNN (meilleurs hyperparamètres)")
+```
+
+```{r fig_compare, echo=FALSE}
+barplot(
+  comparaison,
+  beside = TRUE,
+  col = c("steelblue3", "tomato3"),
+  names.arg = colnames(comparaison),
+  ylab = "Score moyen en validation croisée",
+  main = paste0("Comparaison RF (ntree=", best_ntree, ") vs KNN (K=", best_k, ")")
+)
+legend(
+  "bottomright",
+  legend = c("RF", "KNN"),
+  fill = c("steelblue3", "tomato3"),
+  bty = "n"
+)
+```
+
+Différences RF - KNN :
+- accuracy = **`r sprintf('%.4f', delta['accuracy'])`**,
+- sensitivity = **`r sprintf('%.4f', delta['sensitivity'])`**,
+- specificity = **`r sprintf('%.4f', delta['specificity'])`**.
+
+# Analyse de mtry
+
+L'étude de `mtry` est détaillée ici en fixant `ntree = `r best_ntree``.
+
+```{r tab_mtry_perf, echo=FALSE}
+mtry_perf_df <- data.frame(mtry = as.numeric(rownames(mtry_perf)), round(mtry_perf, 4))
+knitr::kable(mtry_perf_df, caption = "Impact de mtry à ntree fixé")
+```
+
+```{r fig_mtry, echo=FALSE}
+matplot(
+  x = mtry_values,
+  y = mtry_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "mtry",
+  ylab = "Score moyen en validation croisée",
+  main = paste0("Random Forest : impact de mtry (ntree=", best_ntree, ")")
+)
+abline(v = default_mtry, lty = 2, col = "grey40")
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity", paste0("mtry défaut=", default_mtry)),
+  col = c("dodgerblue3", "darkorange3", "darkgreen", "grey40"),
+  lty = c(1, 1, 1, 2),
+  pch = c(1, 2, 3, NA),
+  bty = "n"
+)
+```
+
+Le meilleur `mtry` testé est **`r best_mtry`** (`mtry` par défaut = `r default_mtry`) avec accuracy = **`r sprintf('%.4f', mtry_perf[as.character(best_mtry), 'accuracy'])`**.
+
+
+# Conclusion
+
+La validation croisée à 10 folds permet d'identifier des hyperparamètres performants pour RF (`ntree`) et KNN (`K`) en se basant sur des métriques de classification calculées manuellement.  
+La comparaison des deux méthodes met en évidence les écarts sur chaque métrique, et l'analyse de `mtry` précise la sensibilité de Random Forest à ce paramètre.
+Les résultats nous montrent que le KNN(1) est meilleur sur cette tache que le RF(15) et RF(10).
+
+\appendix
+
+# Annexe : Code
+
+Conformément à la consigne, le code utilisé est listé ci-dessous.
+
+```{r annexe_code, echo=FALSE, results='asis'}
+labels <- c(
+  "code_setup",
+  "code_metrics",
+  "code_folds",
+  "code_rf_cv",
+  "code_knn_cv",
+  "code_compare",
+  "code_mtry",
+  "code_checks",
+  "fig_spectres",
+  "fig_rf",
+  "fig_knn",
+  "fig_compare",
+  "fig_mtry"
+)
+
+code_lines <- unlist(lapply(labels, function(lbl) {
+  c(
+    paste0("# ---- ", lbl, " ----"),
+    knitr::knit_code$get(lbl),
+    ""
+  )
+}))
+
+cat("```r\n")
+cat(paste(code_lines, collapse = "\n"))
+cat("\n```\n")
+```

@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+# Rendre un fichier .Rmd en HTML
+# Exemple: ./commandes html Projet4_Hauguel_Memeteau_Laignel.Rmd
+
+# Rendre un fichier .Rmd en PDF
+# Exemple: ./commandes pdf Projet4_Hauguel_Memeteau_Laignel.Rmd
+
+# Rendre un fichier .Rmd en HTML puis PDF
+# Exemple: ./commandes both Projet4_Hauguel_Memeteau_Laignel.Rmd
+
+# Rendre tous les .Rmd du projet en HTML
+# Exemple: ./commandes all-html
+
+# Rendre tous les .Rmd du projet en PDF
+# Exemple: ./commandes all-pdf
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 {html|pdf|both|all-html|all-pdf|all-both} [fichier.Rmd]"
+  exit 1
+fi
+
+render_one() {
+  local format="$1"
+  local file="$2"
+  Rscript -e "rmarkdown::render('$file', output_format='$format')"
+}
+
+render_all() {
+  local format="$1"
+  while IFS= read -r -d '' file; do
+    echo "Rendering $file -> $format"
+    Rscript -e "rmarkdown::render('$file', output_format='$format')"
+  done < <(find . -name "*.Rmd" -print0)
+}
+
+case "$1" in
+  html)
+    [[ $# -eq 2 ]] || { echo "Usage: $0 html fichier.Rmd"; exit 1; }
+    render_one "html_document" "$2"
+    ;;
+  pdf)
+    [[ $# -eq 2 ]] || { echo "Usage: $0 pdf fichier.Rmd"; exit 1; }
+    render_one "pdf_document" "$2"
+    ;;
+  both)
+    [[ $# -eq 2 ]] || { echo "Usage: $0 both fichier.Rmd"; exit 1; }
+    render_one "html_document" "$2"
+    render_one "pdf_document" "$2"
+    ;;
+  all-html)
+    render_all "html_document"
+    ;;
+  all-pdf)
+    render_all "pdf_document"
+    ;;
+  all-both)
+    render_all "html_document"
+    render_all "pdf_document"
+    ;;
+  *)
+    echo "Option inconnue: $1"
+    echo "Usage: $0 {html|pdf|both|all-html|all-pdf|all-both} [fichier.Rmd]"
+    exit 1
+    ;;
+esac

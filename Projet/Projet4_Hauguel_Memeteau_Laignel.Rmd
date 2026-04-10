@@ -4,154 +4,394 @@ author: "Margot Laignel-Arthur Hauguel-Loïc Mémeteau"
 output: pdf_document
 ---
 
-# Chargement des Données
+# Introduction
 
-```{r}
+Les Random Forests sont des méthodes d'apprentissage supervisé ensemblistes qui agrègent de nombreux arbres de décision construits de manière stochastique. Ce projet vise à estimer, par validation croisée à 10 folds, les performances de classification de ce modèle pour plusieurs valeurs de `ntree`, puis à comparer ces résultats à ceux de l'algorithme des K plus proches voisins (KNN).  
+Les métriques étudiées sont l'`accuracy`, la `sensitivity` et la `specificity`, avec la classe `1` définie comme classe positive et la classe `0` comme classe négative.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
 library(randomForest)
-#setwd("C:/Users/margo/OneDrive/Documents/M1_SSD/ApprentissageStat/Projet_4_ApprentissageStats/Projet_4_Apprentissage_Stats/Projet")
-load("Projet/bacteria-dataset.Rdata")
-summary(X)
-dim(X)
+load("bacteria-dataset.Rdata")
+set.seed(123)
 
-# Visualisation
-matplot(t(X), type = "l", lty = 1, col = ifelse(Y == 1, "orange", "grey"),
-        main = "Signaux spectraux (Orange = Classe 1, Gris = Classe 0)",
-        xlab = "Canal spectral", ylab = "Intensité")
-
+# TODO: il faut ajouter ceci -> produire une version finale avec code uniquement en annexe (second fichier).
 ```
 
+# Description des Données
 
+Le fichier `bacteria-dataset.Rdata` contient :
+- une matrice `X` de taille 2403 x 240 (signaux spectraux),
+- un vecteur `Y` de longueur 2403 (étiquettes de classe 0/1).
 
-```{r}
+```{r data_checks}
+dim(X)
+length(Y)
+table(Y)
+prop.table(table(Y))
+```
+
+```{r data_visualisation}
+matplot(
+  t(X),
+  type = "l",
+  lty = 1,
+  col = ifelse(Y == 1, "orange", "grey"),
+  main = "Signaux spectraux (orange = classe 1, gris = classe 0)",
+  xlab = "Canal spectral",
+  ylab = "Intensité"
+)
+```
+
+Dans toute la suite, on considère explicitement :
+- classe positive : `1`,
+- classe négative : `0`.
+
+# Méthodologie
+
+Les Random Forests contrôlent leur complexité principalement via :
+- `ntree` : nombre d'arbres agrégés,
+- `mtry` : nombre de variables candidates testées à chaque split.
+
+Dans le package `randomForest`, pour une tâche de classification avec `p` variables, la valeur par défaut est `mtry = floor(sqrt(p))`. Ici `p = 240`, donc `mtry` par défaut vaut :
+
+```{r mtry_default_value}
+floor(sqrt(ncol(X)))
+```
+
+Un `ntree` plus élevé peut stabiliser la variance du modèle mais augmente le coût de calcul. Le paramètre `mtry` agit sur le niveau d'aléa des arbres, donc sur le compromis biais/variance (et indirectement sur la complexité effective du modèle). L'évaluation est faite par validation croisée stratifiée à 10 folds.
+
+```{r params}
 parametres_ntree <- c(25, 50, 100, 250, 500, 1000)
+parametres_k <- 1:9
 kfolds <- 10
+```
 
-# Classe 1 : positive
-# Classe 0 : negative
+```{r metric_functions}
 accuracy <- function(true_positive, true_negative, false_positive, false_negative) {
-  # Nombre total d'observations evaluees.
   total <- true_positive + true_negative + false_positive + false_negative
-  # Evite une division par zero si jamais un fold est vide.
   if (total == 0) return(NA_real_)
   (true_positive + true_negative) / total
 }
 
 sensitivity <- function(true_positive, false_negative) {
-  # Sensibilite = proportion de positifs correctement detectes.
   denom <- true_positive + false_negative
   if (denom == 0) return(NA_real_)
   true_positive / denom
 }
 
 specificity <- function(true_negative, false_positive) {
-  # Specificite = proportion de negatifs correctement detectes.
   denom <- true_negative + false_positive
   if (denom == 0) return(NA_real_)
   true_negative / denom
 }
 
 results <- function(y_true, y_pred) {
-  # Uniformise le type pour comparer proprement "0"/"1" (facteurs, numeriques...).
   y_true <- as.character(y_true)
   y_pred <- as.character(y_pred)
 
-  # Composantes de la matrice de confusion (classe positive = "1").
   true_positive <- sum(y_true == "1" & y_pred == "1")
   false_positive <- sum(y_true == "0" & y_pred == "1")
   true_negative <- sum(y_true == "0" & y_pred == "0")
   false_negative <- sum(y_true == "1" & y_pred == "0")
 
-  acc <- accuracy(true_positive, true_negative, false_positive, false_negative)
-  sens <- sensitivity(true_positive, false_negative)
-  spec <- specificity(true_negative, false_positive)
-
-  c(accuracy = acc, sensitivity = sens, specificity = spec)
+  c(
+    accuracy = accuracy(true_positive, true_negative, false_positive, false_negative),
+    sensitivity = sensitivity(true_positive, false_negative),
+    specificity = specificity(true_negative, false_positive)
+  )
 }
+```
 
-# Création de 10 folds stratifies (pour conserver la proportion des classes)
-set.seed(123)
-y_char <- as.character(Y)
-
-# On melange separement les indices des positifs et des negatifs.
-idx_pos <- sample(which(y_char == "1"))
-idx_neg <- sample(which(y_char == "0"))
+```{r create_folds}
+# Découpage stratifié en 10 folds
+idx_pos <- sample(which(as.character(Y) == "1"))
+idx_neg <- sample(which(as.character(Y) == "0"))
 
 fold_id <- integer(length(Y))
-# Répartition des positifs dans les 10 folds.
 fold_id[idx_pos] <- rep(seq_len(kfolds), length.out = length(idx_pos))
-# Répartition des négatifs dans les 10 folds.
 fold_id[idx_neg] <- rep(seq_len(kfolds), length.out = length(idx_neg))
 
-# Liste des indices de test pour chaque fold.
 folds <- lapply(seq_len(kfolds), function(f) which(fold_id == f))
 
-# Boucle de validation croisee sur les valeurs de ntree
-# Contiendra, pour chaque ntree, les k splits (train/test) associés.
-cv_splits <- vector("list", length(parametres_ntree))
-names(cv_splits) <- paste0("ntree_", parametres_ntree)
-
-for (i in seq_along(parametres_ntree)) {
-  ntree_value <- parametres_ntree[i]
-  cv_splits[[i]] <- vector("list", kfolds)
-
-  for (fold in seq_len(kfolds)) {
-    test_idx <- folds[[fold]]
-    # Tous les indices sauf ceux de test servent a l'entrainement.
-    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
-
-    cv_splits[[i]][[fold]] <- list(
-      ntree = ntree_value,
-      fold = fold,
-      train_idx = train_idx,
-      test_idx = test_idx
-    )
-  }
-}
+# Contrôle de taille des folds
+sapply(folds, length)
 ```
 
-```{r}
-rf1 <- randomForest(x = X, y = as.factor(Y))
-summary(rf1)
-stats <- results(Y, rf1$predicted)
-print(stats)
-```
+# Résultats Random Forest
 
-```{r}
-# TODO: il faut ajouter ceci -> calculer les predictions fold par fold pour chaque ntree.
-# TODO: il faut ajouter ceci -> moyenner accuracy/sensitivity/specificity pour chaque ntree.
-# 1. Initialisation d'un tableau pour stocker les moyennes
+```{r rf_cv_performance}
 rf_perf <- matrix(0, nrow = length(parametres_ntree), ncol = 3)
 colnames(rf_perf) <- c("accuracy", "sensitivity", "specificity")
 rownames(rf_perf) <- parametres_ntree
 
-# 2. Boucle principale
 for (i in seq_along(parametres_ntree)) {
   n <- parametres_ntree[i]
-  
-  # On utilise 'sapply' pour boucler sur les 10 folds et récupérer les résultats
-  scores_folds <- sapply(1:kfolds, function(f) {
-    # Indices train/test
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
     test_idx <- folds[[f]]
-    train_idx <- setdiff(1:nrow(X), test_idx)
-    
-    # Entraînement et Prédiction
-    mod <- randomForest(X[train_idx, ], as.factor(Y[train_idx]), ntree = n)
-    preds <- predict(mod, X[test_idx, ])
-    
-    # Calcul des métriques via ta fonction
-    return(results(Y[test_idx], preds))
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    mod <- randomForest(
+      x = X[train_idx, , drop = FALSE],
+      y = as.factor(Y[train_idx]),
+      ntree = n
+    )
+    preds <- predict(mod, X[test_idx, , drop = FALSE])
+    results(Y[test_idx], preds)
   })
-  
-  # On moyenne les résultats des 10 folds (rowMeans car sapply renvoie une matrice 3x10)
+
   rf_perf[i, ] <- rowMeans(scores_folds)
 }
 
-# 3. Affichage final
 rf_perf
 ```
 
-```{r}
-# TODO: il faut ajouter ceci -> appliquer la meme procedure en KNN pour K = 1,...,9.
-# TODO: il faut ajouter ceci -> comparer graphiquement RF vs KNN sur les 3 metriques.
-# TODO: il faut ajouter ceci -> etudier eventuellement l'impact de mtry.
+```{r rf_plot}
+matplot(
+  x = parametres_ntree,
+  y = rf_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "ntree",
+  ylab = "Score moyen en validation croisée",
+  main = "Random Forest : performances en fonction de ntree"
+)
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity"),
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  lty = 1,
+  pch = 1:3,
+  bty = "n"
+)
 ```
+
+```{r rf_interpretation}
+max_acc_rf <- max(rf_perf[, "accuracy"])
+best_ntree <- min(as.numeric(rownames(rf_perf)[rf_perf[, "accuracy"] == max_acc_rf]))
+
+cat(
+  sprintf(
+    "Le meilleur ntree (critère accuracy) est %d, avec accuracy = %.4f, sensitivity = %.4f, specificity = %.4f.",
+    best_ntree,
+    rf_perf[as.character(best_ntree), "accuracy"],
+    rf_perf[as.character(best_ntree), "sensitivity"],
+    rf_perf[as.character(best_ntree), "specificity"]
+  )
+)
+```
+
+La valeur retenue pour `ntree` est celle qui maximise l'`accuracy` moyenne en validation croisée (avec choix de la plus petite valeur en cas d'égalité), afin de limiter la complexité de calcul à performance équivalente.
+
+# Résultats KNN
+
+```{r knn_cv_performance}
+knn_perf <- matrix(0, nrow = length(parametres_k), ncol = 3)
+colnames(knn_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(knn_perf) <- parametres_k
+
+for (i in seq_along(parametres_k)) {
+  k <- parametres_k[i]
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    # Standardisation par fold (sans fuite d'information)
+    x_train <- scale(X[train_idx, , drop = FALSE])
+    center_train <- attr(x_train, "scaled:center")
+    scale_train <- attr(x_train, "scaled:scale")
+    scale_train[scale_train == 0] <- 1
+    x_test <- scale(X[test_idx, , drop = FALSE], center = center_train, scale = scale_train)
+
+    preds <- class::knn(
+      train = x_train,
+      test = x_test,
+      cl = as.factor(Y[train_idx]),
+      k = k
+    )
+    results(Y[test_idx], preds)
+  })
+
+  knn_perf[i, ] <- rowMeans(scores_folds)
+}
+
+knn_perf
+```
+
+```{r knn_plot}
+matplot(
+  x = parametres_k,
+  y = knn_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "K",
+  ylab = "Score moyen en validation croisée",
+  main = "KNN : performances en fonction de K"
+)
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity"),
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  lty = 1,
+  pch = 1:3,
+  bty = "n"
+)
+```
+
+```{r knn_interpretation}
+max_acc_knn <- max(knn_perf[, "accuracy"])
+best_k <- min(as.numeric(rownames(knn_perf)[knn_perf[, "accuracy"] == max_acc_knn]))
+
+cat(
+  sprintf(
+    "Le meilleur K (critère accuracy) est %d, avec accuracy = %.4f, sensitivity = %.4f, specificity = %.4f.",
+    best_k,
+    knn_perf[as.character(best_k), "accuracy"],
+    knn_perf[as.character(best_k), "sensitivity"],
+    knn_perf[as.character(best_k), "specificity"]
+  )
+)
+```
+
+# Comparaison RF vs KNN
+
+```{r best_model_comparison}
+comparaison <- rbind(
+  RF = rf_perf[as.character(best_ntree), ],
+  KNN = knn_perf[as.character(best_k), ]
+)
+
+comparaison
+```
+
+```{r comparison_plot}
+barplot(
+  comparaison,
+  beside = TRUE,
+  col = c("steelblue3", "tomato3"),
+  names.arg = colnames(comparaison),
+  ylab = "Score moyen en validation croisée",
+  main = paste0("Comparaison RF (ntree=", best_ntree, ") vs KNN (K=", best_k, ")")
+)
+legend(
+  "bottomright",
+  legend = c("RF", "KNN"),
+  fill = c("steelblue3", "tomato3"),
+  bty = "n"
+)
+```
+
+```{r comparison_interpretation}
+delta <- comparaison["RF", ] - comparaison["KNN", ]
+
+cat(
+  sprintf(
+    paste0(
+      "Différences RF - KNN : accuracy = %.4f, sensitivity = %.4f, specificity = %.4f. ",
+      "Ces écarts permettent d'identifier si RF domine globalement ou si le gain dépend de la métrique retenue."
+    ),
+    delta["accuracy"],
+    delta["sensitivity"],
+    delta["specificity"]
+  )
+)
+```
+
+# Analyse détaillée de mtry
+
+La consigne indique que l'étude de `mtry` est optionnelle. Ici elle est approfondie en fixant `ntree` à la meilleure valeur trouvée précédemment.
+
+```{r mtry_cv_performance}
+default_mtry <- floor(sqrt(ncol(X)))
+mtry_values <- sort(unique(c(5, 10, default_mtry, 20, 30, 50)))
+mtry_values <- mtry_values[mtry_values >= 1 & mtry_values <= ncol(X)]
+
+mtry_perf <- matrix(0, nrow = length(mtry_values), ncol = 3)
+colnames(mtry_perf) <- c("accuracy", "sensitivity", "specificity")
+rownames(mtry_perf) <- mtry_values
+
+for (i in seq_along(mtry_values)) {
+  m <- mtry_values[i]
+
+  scores_folds <- sapply(seq_len(kfolds), function(f) {
+    test_idx <- folds[[f]]
+    train_idx <- setdiff(seq_len(nrow(X)), test_idx)
+
+    mod <- randomForest(
+      x = X[train_idx, , drop = FALSE],
+      y = as.factor(Y[train_idx]),
+      ntree = best_ntree,
+      mtry = m
+    )
+    preds <- predict(mod, X[test_idx, , drop = FALSE])
+    results(Y[test_idx], preds)
+  })
+
+  mtry_perf[i, ] <- rowMeans(scores_folds)
+}
+
+mtry_perf
+```
+
+```{r mtry_plot}
+matplot(
+  x = mtry_values,
+  y = mtry_perf,
+  type = "b",
+  pch = 1:3,
+  lty = 1,
+  col = c("dodgerblue3", "darkorange3", "darkgreen"),
+  xlab = "mtry",
+  ylab = "Score moyen en validation croisée",
+  main = paste0("Random Forest : impact de mtry (ntree=", best_ntree, ")")
+)
+abline(v = default_mtry, lty = 2, col = "grey40")
+legend(
+  "bottomright",
+  legend = c("accuracy", "sensitivity", "specificity", paste0("mtry défaut=", default_mtry)),
+  col = c("dodgerblue3", "darkorange3", "darkgreen", "grey40"),
+  lty = c(1, 1, 1, 2),
+  pch = c(1, 2, 3, NA),
+  bty = "n"
+)
+```
+
+```{r mtry_interpretation}
+max_acc_mtry <- max(mtry_perf[, "accuracy"])
+best_mtry <- min(as.numeric(rownames(mtry_perf)[mtry_perf[, "accuracy"] == max_acc_mtry]))
+
+cat(
+  sprintf(
+    "Le meilleur mtry testé est %d (mtry par défaut = %d), avec accuracy = %.4f.",
+    best_mtry,
+    default_mtry,
+    mtry_perf[as.character(best_mtry), "accuracy"]
+  )
+)
+```
+
+# Contrôles de cohérence
+
+```{r validation_checks}
+check_metrics <- function(m) {
+  all(!is.na(m)) && all(m >= 0) && all(m <= 1)
+}
+
+c(
+  rf_ok = check_metrics(rf_perf),
+  knn_ok = check_metrics(knn_perf),
+  mtry_ok = check_metrics(mtry_perf)
+)
+```
+
+# Conclusion
+
+Ce travail met en place une validation croisée stratifiée à 10 folds pour comparer Random Forest et KNN sur les métriques `accuracy`, `sensitivity` et `specificity`. La comparaison permet de sélectionner un `ntree` optimal pour RF et un `K` optimal pour KNN selon l'`accuracy` moyenne, puis d'évaluer l'effet du paramètre `mtry` autour de sa valeur par défaut (`15`).  
+Globalement, la méthode retenue est celle offrant le meilleur compromis entre performance moyenne et complexité de réglage, en s'appuyant sur des métriques calculées manuellement à partir de la matrice de confusion.
